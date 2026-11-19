@@ -198,6 +198,16 @@ details summary{cursor:pointer;font-weight:700;color:var(--muted);font-size:.86r
 .confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--sunk);border-radius:var(--r);padding:10px 12px;font-size:.9rem}
 .confirm span{flex:1;min-width:180px}
 .recs{display:flex;flex-wrap:wrap;gap:6px}
+.btn.wisweek{color:var(--danger);margin-left:auto}
+.undo{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--accent-soft);border-radius:var(--r);padding:10px 12px;font-size:.9rem;margin-bottom:14px}
+.undo span{flex:1;min-width:160px}
+.qrbox{display:grid;place-items:center;background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:16px;width:max-content;margin:0 auto}
+.qrbox img,.qrbox canvas{display:block;width:200px;height:200px}
+.linkveld{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px;font-size:.9rem;color:var(--fg);font-family:ui-monospace,Menlo,monospace}
+.stappen{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:.92rem}
+.syncstatus{display:flex;gap:8px;align-items:center;font-size:.9rem}
+.syncstatus .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none}
+.syncstatus.fout .dot{background:var(--danger)}
 
 /* tabbalk */
 .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -217,6 +227,7 @@ details summary{cursor:pointer;font-weight:700;color:var(--muted);font-size:.86r
 <div id="toast" class="toast" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 /* ================= basis ================= */
 const DAGNAAM=['zo','ma','di','wo','do','vr','za'];
@@ -266,7 +277,7 @@ function lsLoad(){try{const v=JSON.parse(localStorage.getItem(LS)||'null');if(!v
 const clean=o=>JSON.parse(JSON.stringify(o));
 const queues={};
 function schrijf(path,data){ // één schrijfactie tegelijk per document; laatste toestand wint
-  if(S.mode!=='db'){lsSave();return Promise.resolve(true)}
+  if(S.mode!=='db'){lsSave();syncMark(path,data);return Promise.resolve(true)}
   const q=queues[path]||(queues[path]={busy:false,next:null});
   q.next=data===null?{del:true}:{data:clean(data)};
   if(q.busy)return Promise.resolve(true);
@@ -329,9 +340,12 @@ function slotHTML(w,d,slot,s){
 }
 function planHTML(){
   const w=S.start;
-  let h=`<div class="narrow"><header class="head"><h1>🍽️ Mijn Menuplanner</h1><p class="note" style="font-size:.95rem">Van zaterdag tot vrijdag · lekker eenvoudig</p></header>`;
-  if(!S.gerechten.size&&!S.comps.size)h+=`<div class="banner"><b>Welkom!</b> Je kookboek is nog leeg. Ga naar <b>Onderdelen → Back-up terugzetten</b> en kies het bestand <i>mijn-kookboek-backup.json</i>.</div>`;
-  h+=weekNav()+`<div class="row" style="margin:-4px 0 14px"><button class="btn small" data-act="naarlijst" data-w="${w}">Boodschappen voor deze week</button><button class="btn small ghost" data-act="pdfmenu" data-w="${w}">Menu-PDF</button></div><div>`;
+  let h=`<div class="narrow"><header class="head"><div class="row" style="align-items:flex-start"><h1 style="flex:1;min-width:0">🍽️ Mijn Menuplanner</h1><button class="btn small" data-act="toestel">📱 Op ander toestel</button></div><p class="note" style="font-size:.95rem">Van zaterdag tot vrijdag · lekker eenvoudig</p></header>`;
+  if(!S.gerechten.size&&!S.comps.size)h+=`<div class="banner"><b>Welkom!</b> Je kookboek is nog leeg. Gebruik je de menuplanner al op een ander toestel? Koppel dan dit toestel via <b>Onderdelen → Synchroniseren</b>. Anders: <b>Onderdelen → Back-up terugzetten</b>.</div>`;
+  h+=weekNav()+`<div class="row" style="margin:-4px 0 14px"><button class="btn small" data-act="naarlijst" data-w="${w}">Boodschappen voor deze week</button><button class="btn small ghost" data-act="pdfmenu" data-w="${w}">Menu-PDF</button><button class="btn small ghost wisweek" data-act="wisweek" data-w="${w}" ${weekHeeftIets(week(w))?'':'disabled'}>Week wissen</button></div>`;
+  if(S.confirm==='wisweek:'+w)h+=`<div class="confirm" style="margin:-4px 0 14px"><span>De hele week van <b>${weekLabel(w)}</b> wissen? Alle gerechten, alternatieven, opmerkingen en de boodschappenlijst van deze week verdwijnen. Je gerechtenbibliotheek blijft.</span><button class="btn small danger" data-act="wisweek-ok" data-w="${w}">Week wissen</button><button class="btn small ghost" data-act="annuleer">Annuleer</button></div>`;
+  if(S.undoWeek&&S.undoWeek.w===w)h+=`<div class="undo"><span>Week gewist.</span><button class="btn small" data-act="wisweek-terug" data-w="${w}">Ongedaan maken</button></div>`;
+  h+=`<div>`;
   [w].forEach(w=>{const W=week(w);
     h+=`<section class="week"><div class="days">`;
     for(let j=0;j<7;j++){const d=addDays(w,j),dag=W.dagen[d]||{},p=parse(d);
@@ -390,7 +404,8 @@ function onderdelenHTML(){
     <div class="row"><span style="flex:1;min-width:160px">Standaard aantal personen</span><span class="pers"><button data-act="stdpers" data-n="-1" aria-label="Minder">−</button><span>${S.inst.pers}</span><button data-act="stdpers" data-n="1" aria-label="Meer">+</button></span></div>
     <div class="row"><button class="btn" data-act="backup">Back-up downloaden</button><label class="btn" for="restoreIn" style="cursor:pointer">Back-up terugzetten</label><input type="file" id="restoreIn" accept=".json,application/json" hidden></div>
     ${S.confirm&&S.confirm.startsWith('restore')?`<div class="confirm"><span>${esc(S.confirm.slice(8))}</span><button class="btn small danger" data-act="restore-ok">Terugzetten</button><button class="btn small ghost" data-act="annuleer">Annuleer</button></div>`:''}
-    <p class="note"><b>Je gegevens staan alleen op dit toestel.</b> Maak geregeld een back-up (bv. in iCloud Drive via het deelmenu). Een back-up bevat je gerechten, onderdelen, aanbevelingen en alle weekmenu's met hun boodschappenlijst.</p></div></section></div>`;
+    <p class="note">${syncAan()?'':'<b>Je gegevens staan alleen op dit toestel.</b> '}Maak geregeld een back-up (bv. in iCloud Drive via het deelmenu). Een back-up bevat je gerechten, onderdelen, aanbevelingen en alle weekmenu's met hun boodschappenlijst.</p></div></section>
+  <section class="group" id="syncsectie"><h3>Synchroniseren tussen toestellen</h3><div class="list" style="padding:14px;gap:12px">${syncHTML()}</div></section></div>`;
   return h;
 }
 
@@ -592,8 +607,23 @@ document.addEventListener('click',async e=>{
   case'sluit-scrim':if(e.target===t)closeSheet();return;
   case'sluit':closeSheet();return;
   case'annuleer':S.confirm=null;render();return;
-  case'nav':S.noteEdit=null;S.start=addDays(S.start,7*+t.dataset.n);S.lijstWeek=S.start;S.confirm=null;subscribeWeeks();render();return;
-  case'nu':S.start=zaterdag(new Date());S.lijstWeek=S.start;S.confirm=null;subscribeWeeks();render();return;
+  case'nav':S.noteEdit=null;S.start=addDays(S.start,7*+t.dataset.n);S.lijstWeek=S.start;S.confirm=null;S.undoWeek=null;subscribeWeeks();render();return;
+  case'nu':S.start=zaterdag(new Date());S.lijstWeek=S.start;S.confirm=null;S.undoWeek=null;subscribeWeeks();render();return;
+  case'wisweek':S.confirm='wisweek:'+w;render();return;
+  case'wisweek-ok':{S.undoWeek={w,data:clean(week(w))};S.weken[w]=leegWeek(w);S.confirm=null;S.noteEdit=null;render();bewaarWeek(w);toast('Week gewist');return}
+  case'wisweek-terug':{if(!S.undoWeek||S.undoWeek.w!==w)return;S.weken[w]=S.undoWeek.data;S.undoWeek=null;render();bewaarWeek(w);toast('Week teruggezet');return}
+  case'toestel':toestelSheet();return;
+  case'naarsync':closeSheet();S.tab='onderdelen';render();setTimeout(()=>{const s=document.getElementById('syncsectie');if(s)s.scrollIntoView({behavior:'smooth'})},50);return;
+  case'kopieerlink':{const v=koppelLink();try{await navigator.clipboard.writeText(v);toast('Koppellink gekopieerd')}catch(err){const l=document.getElementById('appLink');if(l){l.focus();l.select()}toast('Houd de link ingedrukt en kies Kopieer')}return}
+  case'deellink':{try{await navigator.share({title:'Mijn Menuplanner',url:koppelLink()})}catch(err){if(!err||err.name!=='AbortError'){const l=document.getElementById('appLink');if(l){l.focus();l.select()}toast('Delen lukt hier niet, kopieer de link')}}return}
+  case'koppel':{const u=(document.getElementById('syncUrl')||{}).value||'',c=(document.getElementById('syncCode')||{}).value||'';const k=leesKoppel(u);
+    const url=k?k.u:u.trim(),code=k?k.c:c.trim();
+    if(!/^https:\/\/script\.google\.com\/.+\/exec/.test(url)){toast('Plak de koppellink of de script-link (eindigt op /exec)');return}
+    if(!code){toast('Geef ook de synchronisatiecode');return}
+    koppel(url,code);return}
+  case'syncnu':syncNu();toast('Synchroniseren…');return;
+  case'ontkoppel':S.confirm='ontkoppel';render();return;
+  case'ontkoppel-ok':ontkoppel();S.confirm=null;render();toast('Dit toestel is ontkoppeld');return;
   case'kies':P=null;kiesSheet(w,d,slot,'lib');return;
   case'kiesmodus':SH.modus=t.dataset.m;sheetBody(kiesBody());return;
   case'kiesfilter':SH.f=t.dataset.c;sheetBody(kiesBody());return;
@@ -714,6 +744,109 @@ async function restore(){
   restoreData=null;render();toast('Back-up teruggezet');
 }
 
+/* ================= synchroniseren tussen toestellen ================= */
+// Elk gerecht, onderdeel en elke week wordt apart bewaard bij je eigen Google-script (zie Code.gs).
+// Per stuk wint de nieuwste wijziging; zonder internet wordt alles bewaard en later doorgestuurd.
+const SK='weekmenu.sync';
+const leegSync=()=>({url:'',code:'',tick:0,uit:{},laatst:0,gekoppeld:false});
+let SY=(()=>{try{return Object.assign(leegSync(),JSON.parse(localStorage.getItem(SK)||'null')||{})}catch(e){return leegSync()}})();
+const syncSave=()=>{try{localStorage.setItem(SK,JSON.stringify(SY))}catch(e){}};
+const syncAan=()=>!!(SY.url&&SY.code);
+let syncBezig=false,syncOpnieuw=false,syncT=null,syncFout='';
+function weekHeeftIets(x){return !!x&&(Object.values(x.dagen||{}).some(d=>d&&(d.hoofd||d.alt||d.notitie||d.altAan))||(x.extra||[]).length>0||Object.keys(x.af||{}).length>0||Object.keys(x.uit||{}).length>0)}
+function syncMark(path,data){
+  if(!syncAan())return;
+  SY.uit[path]={t:Date.now(),d:data===null?null:clean(data)};syncSave();
+  clearTimeout(syncT);syncT=setTimeout(syncNu,1500);
+}
+function allePaden(){
+  const p=[];S.gerechten.forEach((g,id)=>p.push(['gerechten/'+id,Object.assign({},g,{id:undefined})]));
+  S.comps.forEach((c,id)=>p.push(['componenten/'+id,Object.assign({},c,{id:undefined})]));
+  p.push(['config/aanbevelingen',{basis:S.rec}],['config/instellingen',S.inst]);
+  Object.entries(S.weken).forEach(([w,x])=>{if(weekHeeftIets(x))p.push(['weken/'+w,x])});
+  return p;
+}
+function pasToe(path,d){
+  const i=path.indexOf('/'),soort=path.slice(0,i),id=path.slice(i+1);
+  if(soort==='gerechten'){if(d)S.gerechten.set(id,Object.assign({id},d));else S.gerechten.delete(id)}
+  else if(soort==='componenten'){if(d)S.comps.set(id,Object.assign({id},d));else S.comps.delete(id)}
+  else if(path==='config/aanbevelingen')S.rec=(d&&d.basis)||{};
+  else if(path==='config/instellingen')S.inst=Object.assign({pers:4},d||{});
+  else if(soort==='weken'){if(d)S.weken[id]=d;else delete S.weken[id]}
+}
+async function syncNu(){
+  if(!syncAan())return;
+  if(syncBezig){syncOpnieuw=true;return}
+  syncBezig=true;clearTimeout(syncT);
+  const eerste=!SY.gekoppeld,verstuur=eerste?{}:Object.assign({},SY.uit);let veranderd=false;
+  try{
+    const r=await fetch(SY.url,{method:'POST',body:JSON.stringify({actie:'sync',code:SY.code,sinds:eerste?0:SY.tick,
+      wijzigingen:Object.entries(verstuur).map(([p,x])=>({p,t:x.t,d:x.d}))})});
+    const j=await r.json();
+    if(!j.ok)throw new Error(j.fout||'Synchroniseren mislukt');
+    for(const[p,x]of Object.entries(verstuur)){if(SY.uit[p]&&SY.uit[p].t===x.t)delete SY.uit[p]}
+    for(const[p,x]of Object.entries(j.docs||{})){const lok=SY.uit[p];if(lok&&lok.t>x.t)continue;pasToe(p,x.d);veranderd=true}
+    if(eerste){ // eerste keer: wat alleen op dit toestel staat, gaat naar de andere toestellen
+      const opServer=new Set(Object.keys(j.docs||{})),nu=Date.now();
+      allePaden().forEach(([p,d])=>{if(!opServer.has(p)&&!SY.uit[p])SY.uit[p]={t:nu,d:clean(d)}});
+      SY.gekoppeld=true;if(Object.keys(SY.uit).length)syncOpnieuw=true;
+      toast(opServer.size?'Gekoppeld: je menuplanner is opgehaald':'Gekoppeld: je gegevens worden doorgestuurd');
+    }
+    SY.tick=j.tick;SY.laatst=Date.now();syncFout='';syncSave();
+    if(veranderd)lsSave();
+  }catch(e){syncFout=(e&&e.message&&!/fetch|network|load/i.test(e.message))?e.message:'Geen verbinding, later opnieuw'}
+  finally{
+    syncBezig=false;if(veranderd||S.tab==='onderdelen')rerenderLive();
+    if(syncOpnieuw){syncOpnieuw=false;setTimeout(syncNu,300)}
+  }
+}
+function koppel(url,code){SY=Object.assign(leegSync(),{url,code});syncSave();S.confirm=null;render();syncNu()}
+function ontkoppel(){SY=leegSync();syncSave();syncFout=''}
+function koppelLink(){
+  const basis=location.href.split('#')[0].replace(/index\.html$/,'');
+  return basis+'#koppel='+encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify({u:SY.url,c:SY.code})))));
+}
+function leesKoppel(txt){
+  const m=String(txt||'').match(/koppel=([^&\s]+)/);if(!m)return null;
+  try{const o=JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));return o&&o.u&&o.c?o:null}catch(e){return null}
+}
+function syncHTML(){
+  if(!syncAan())return`<p class="note" style="font-size:.9rem;color:var(--fg)">Zie je op je pc, iPhone en iPad graag altijd hetzelfde menu? Koppel elk toestel aan je eigen Google-script (zie de handleiding). Heb je al een toestel gekoppeld? Plak hier dan de <b>koppellink</b> die je via <b>📱 Op ander toestel</b> krijgt.</p>
+    <label class="f">Koppellink of script-link<input id="syncUrl" placeholder="https://… (koppellink of …/exec)" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    <label class="f">Synchronisatiecode <span style="font-weight:400">(niet nodig bij een koppellink)</span><input id="syncCode" type="password" autocomplete="off"></label>
+    <div class="row"><button class="btn primary" data-act="koppel">Koppelen</button></div>
+    <p class="note">Koppel je voor het eerst? Doe dat dan op het toestel met je meest volledige gegevens: wat al bij Google staat, gaat voor.</p>`;
+  const wacht=Object.keys(SY.uit).length;
+  const tijd=SY.laatst?new Date(SY.laatst).toLocaleString('nl-BE',{weekday:'short',hour:'2-digit',minute:'2-digit'}):'nog niet';
+  return`<div class="syncstatus${syncFout?' fout':''}"><span class="dot"></span><span>${syncFout?'⚠️ '+esc(syncFout):'Gekoppeld · laatst gesynchroniseerd: '+esc(tijd)}${wacht?` · ${wacht} wijziging${wacht>1?'en':''} wacht${wacht>1?'en':''} nog`:''}</span></div>
+    <div class="row"><button class="btn" data-act="syncnu">Nu synchroniseren</button><button class="btn" data-act="toestel">📱 Op ander toestel</button><span class="spacer"></span><button class="btn ghost" data-act="ontkoppel" style="color:var(--danger)">Ontkoppelen</button></div>
+    ${S.confirm==='ontkoppel'?`<div class="confirm"><span>Dit toestel ontkoppelen? Je gegevens blijven hier staan, maar wijzigingen worden niet meer gedeeld.</span><button class="btn small danger" data-act="ontkoppel-ok">Ontkoppelen</button><button class="btn small ghost" data-act="annuleer">Annuleer</button></div>`:''}`;
+}
+function toestelSheet(){
+  SH={type:'toestel'};
+  if(!syncAan()){
+    openSheet('Op ander toestel openen',`<p style="margin:0">Je menuplanner bewaart nu alles <b>alleen op dit toestel</b>. Een link alleen neemt je gerechten en weekmenu's dus niet mee.</p>
+     <p style="margin:0">Zet eerst <b>synchroniseren</b> aan (eenmalig, ± 10 minuten, zie de handleiding). Daarna krijg je hier een koppellink en QR-code: open die op je iPhone of iPad en alles staat er meteen op, en blijft gelijk.</p>
+     <div class="row"><button class="btn primary" data-act="naarsync">Synchroniseren instellen</button></div>`);
+    return;
+  }
+  openSheet('Op ander toestel openen',`
+   <p style="margin:0">Open deze koppellink op je iPhone of iPad. Het toestel wordt dan automatisch gekoppeld en haalt al je gerechten, onderdelen en weekmenu's op. Wat je daarna ergens wijzigt, verschijnt ook op je andere toestellen.</p>
+   <div><span class="eyebrow">Scan met de camera van je iPhone of iPad</span><div class="qrbox" id="qr" style="margin-top:8px" aria-label="QR-code met de koppellink"></div></div>
+   <div><span class="eyebrow">Of kopieer en stuur de koppellink naar jezelf</span>
+   <input class="linkveld" id="appLink" readonly value="${esc(koppelLink())}" style="margin-top:8px" aria-label="Koppellink">
+   <div class="row" style="margin-top:8px"><button class="btn primary" data-act="kopieerlink">Kopieer koppellink</button>${navigator.share?'<button class="btn" data-act="deellink">Delen…</button>':''}</div></div>
+   <div><span class="eyebrow">Als app op je beginscherm (iPhone/iPad)</span>
+   <ol class="stappen" style="margin-top:8px"><li>Open de koppellink in <b>Safari</b>.</li><li>Tik op de deelknop <b>⬆︎</b> en kies <b>Zet op beginscherm</b>.</li><li>Open de app vanaf je beginscherm. Vraagt hij om te koppelen? Ga naar <b>Onderdelen → Synchroniseren</b>, plak de koppellink en tik op <b>Koppelen</b>. (De app op je beginscherm heeft zijn eigen geheugen, los van Safari.)</li></ol></div>
+   <div class="banner warn" style="margin:0">Wie deze link heeft, kan je menuplanner bekijken en wijzigen. Stuur hem alleen naar jezelf.</div>`);
+  const box=document.getElementById('qr');
+  try{if(window.QRCode){new QRCode(box,{text:koppelLink(),width:200,height:200,colorDark:'#1C2419',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.L})}else box.parentElement.hidden=true}catch(e){box.parentElement.hidden=true}
+  document.getElementById('appLink').addEventListener('focus',e=>e.target.select());
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')syncNu()});
+window.addEventListener('online',()=>syncNu());
+setInterval(()=>{if(document.visibilityState==='visible')syncNu()},60000);
+
 /* ================= start ================= */
 function subscribeWeeks(){
   if(S.mode!=='db')return;
@@ -738,7 +871,11 @@ render();
   S.mode='local';lsLoad();
   if(!S.comps.size){try{const v=await(await fetch('data.json',{cache:'no-cache'})).json();
     (v.gerechten||[]).forEach(g=>S.gerechten.set(g.id,g));(v.componenten||[]).forEach(c=>S.comps.set(c.id,c));S.rec=v.aanbevelingen||{};S.inst=Object.assign({pers:4},v.instellingen||{});lsSave()}catch(e){S.leeg=true}}
+  // geopend via een koppellink? Dan dit toestel meteen koppelen.
+  const kl=leesKoppel(location.hash);
+  if(kl){history.replaceState(null,'',location.href.split('#')[0]);if(kl.u!==SY.url||kl.c!==SY.code)SY=Object.assign(leegSync(),{url:kl.u,code:kl.c});syncSave()}
   render();
+  syncNu();
   try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
   if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 })();
