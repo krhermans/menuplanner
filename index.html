@@ -205,6 +205,29 @@ details summary{cursor:pointer;font-weight:700;color:var(--muted);font-size:.86r
 .qrbox img,.qrbox canvas{display:block;width:200px;height:200px}
 .linkveld{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px;font-size:.9rem;color:var(--fg);font-family:ui-monospace,Menlo,monospace}
 .stappen{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:.92rem}
+/* afdrukken: alleen het weekmenu, zwart op wit, één A4 */
+#printarea{display:none}
+@media print{
+  @page{size:A4 portrait;margin:14mm 14mm 12mm}
+  html,body{background:#fff!important;color:#000!important;height:auto}
+  body>*:not(#printarea){display:none!important}
+  #printarea{display:block!important;font-family:var(--body);color:#000}
+  .pm-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;border-bottom:2px solid #000;padding-bottom:6px;margin-bottom:4px}
+  .pm-h h1{font-family:var(--display);font-weight:400;font-size:26pt;margin:0}
+  .pm-h span{font-size:11pt;color:#444}
+  .pm-t{width:100%;border-collapse:collapse}
+  .pm-t td{border-bottom:1px solid #bbb;padding:9px 6px;vertical-align:top}
+  .pm-t tr{break-inside:avoid}
+  .pm-dag{width:24%;font-weight:700;font-size:12pt}
+  .pm-dag small{display:block;font-weight:400;color:#555;font-size:10pt}
+  .pm-g{font-size:13pt;font-weight:700}
+  .pm-leeg{color:#999;font-weight:400}
+  .pm-alt{font-size:11pt;margin-top:3px}
+  .pm-alt b{font-weight:600}
+  .pm-n{font-size:10pt;font-style:italic;margin-top:4px;color:#333}
+  .pm-p{width:12%;text-align:right;font-size:10pt;color:#555;white-space:nowrap}
+  .pm-f{margin-top:10px;font-size:9pt;color:#777;text-align:right}
+}
 .syncstatus{display:flex;gap:8px;align-items:center;font-size:.9rem}
 .syncstatus .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none}
 .syncstatus.fout .dot{background:var(--danger)}
@@ -225,6 +248,7 @@ details summary{cursor:pointer;font-weight:700;color:var(--muted);font-size:.86r
 <div class="tabbar"><nav id="tabs"></nav></div>
 <div id="sheet"></div>
 <div id="toast" class="toast" hidden></div>
+<div id="printarea" aria-hidden="true"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -342,7 +366,7 @@ function planHTML(){
   const w=S.start;
   let h=`<div class="narrow"><header class="head"><div class="row" style="align-items:flex-start"><h1 style="flex:1;min-width:0">🍽️ Mijn Menuplanner</h1><button class="btn small" data-act="toestel">📱 Op ander toestel</button></div><p class="note" style="font-size:.95rem">Van zaterdag tot vrijdag · lekker eenvoudig</p></header>`;
   if(!S.gerechten.size&&!S.comps.size)h+=`<div class="banner"><b>Welkom!</b> Je kookboek is nog leeg. Gebruik je de menuplanner al op een ander toestel? Koppel dan dit toestel via <b>Onderdelen → Synchroniseren</b>. Anders: <b>Onderdelen → Back-up terugzetten</b>.</div>`;
-  h+=weekNav()+`<div class="row" style="margin:-4px 0 14px"><button class="btn small" data-act="naarlijst" data-w="${w}">Boodschappen voor deze week</button><button class="btn small ghost" data-act="pdfmenu" data-w="${w}">Menu-PDF</button><button class="btn small ghost wisweek" data-act="wisweek" data-w="${w}" ${weekHeeftIets(week(w))?'':'disabled'}>Week wissen</button></div>`;
+  h+=weekNav()+`<div class="row" style="margin:-4px 0 14px"><button class="btn small" data-act="naarlijst" data-w="${w}">Boodschappen voor deze week</button><button class="btn small" data-act="printmenu" data-w="${w}">🖨️ Afdrukken of PDF</button><button class="btn small ghost wisweek" data-act="wisweek" data-w="${w}" ${weekHeeftIets(week(w))?'':'disabled'}>Week wissen</button></div>`;
   if(S.confirm==='wisweek:'+w)h+=`<div class="confirm" style="margin:-4px 0 14px"><span>De hele week van <b>${weekLabel(w)}</b> wissen? Alle gerechten, alternatieven, opmerkingen en de boodschappenlijst van deze week verdwijnen. Je gerechtenbibliotheek blijft.</span><button class="btn small danger" data-act="wisweek-ok" data-w="${w}">Week wissen</button><button class="btn small ghost" data-act="annuleer">Annuleer</button></div>`;
   if(S.undoWeek&&S.undoWeek.w===w)h+=`<div class="undo"><span>Week gewist.</span><button class="btn small" data-act="wisweek-terug" data-w="${w}">Ongedaan maken</button></div>`;
   h+=`<div>`;
@@ -577,6 +601,22 @@ function pdfMenu(w){
   doc.line(18,y-5,192,y-5);
   bewaarPdf(doc,'Weekmenu '+w+'.pdf');
 }
+function printMenu(w){
+  const W=week(w),rij=[];
+  for(let i=0;i<7;i++){const d=addDays(w,i),p=parse(d),dag=W.dagen[d]||{},h=dag.hoofd,a=dag.altAan&&dag.alt;
+    rij.push(`<tr><td class="pm-dag">${DAGLANG[p.getDay()].replace(/^./,c=>c.toUpperCase())}<small>${dm(d)}</small></td>
+      <td><div class="pm-g">${h?esc(h.naam)+(isFav(h)?' ★':''):'<span class="pm-leeg">—</span>'}</div>
+      ${a?`<div class="pm-alt">Alternatief: <b>${esc(a.naam)}</b>${a.pers?` (${a.pers} pers.)`:''}</div>`:''}
+      ${dag.notitie?`<div class="pm-n">${esc(dag.notitie)}</div>`:''}</td>
+      <td class="pm-p">${h&&h.pers?h.pers+' pers.':''}</td></tr>`)}
+  const jaar=parse(addDays(w,6)).getFullYear();
+  document.getElementById('printarea').innerHTML=`<div class="pm-h"><h1>Weekmenu</h1><span>zaterdag ${dm(w)} – vrijdag ${dm(addDays(w,6))}/${jaar}</span></div>
+    <table class="pm-t"><tbody>${rij.join('')}</tbody></table><div class="pm-f">Mijn Menuplanner</div>`;
+  const vorige=document.title;document.title='Weekmenu '+dm(w).replace('/','-')+' tot '+dm(addDays(w,6)).replace('/','-');
+  const klaar=()=>{document.title=vorige;window.removeEventListener('afterprint',klaar)};
+  window.addEventListener('afterprint',klaar);
+  setTimeout(()=>{try{window.print()}catch(e){toast('Afdrukken lukt hier niet')}},50);
+}
 function pdfLijst(w){
   const J=window.jspdf&&window.jspdf.jsPDF;if(!J){toast('PDF-maker niet geladen');return}
   const doc=new J({unit:'mm',format:'a4'}),b=boodschappen(w),W=week(w);
@@ -639,6 +679,7 @@ document.addEventListener('click',async e=>{
   case'notitie-wis':{const dag=week(w).dagen[d];if(dag)delete dag.notitie;S.noteEdit=null;render();bewaarWeek(w);return}
   case'naarlijst':S.lijstWeek=w;S.start=w;S.tab='lijst';render();window.scrollTo(0,0);return;
   case'pdfmenu':pdfMenu(w);return;
+  case'printmenu':printMenu(w);return;
   case'pdflijst':pdfLijst(w);return;
   case'lijstweek':S.lijstWeek=w;render();return;
   case'toonaf':S.toonAf=!S.toonAf;render();return;
